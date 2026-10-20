@@ -14,7 +14,7 @@ description: >-
 
 # YouTube / X → Obsidian study notes
 
-Pipeline: **链接清单 → yt-dlp 抓音频（+ 作者字幕）→ 有字幕直接用，没有才跑 Whisper large-v3 → 整理成结构化 Obsidian 笔记**.
+Pipeline: **链接清单 → yt-dlp 抓音频（+ 作者字幕）→ 有字幕直接用，没有才跑 Whisper large-v3 → 去口癖整理成文字稿（脚本校验只删不改）→ 详细的结构化 Obsidian 笔记**.
 This replaces screen-recording (OBS): no real-time playback, far faster, lossless audio.
 
 The hard part isn't the happy path — it's the half-dozen environment landmines (Chrome
@@ -77,44 +77,59 @@ challenge; without them you only get image storyboards. See environment notes fo
 
 ### 4. Transcribe
 ```
-powershell -File scripts\transcribe_all.ps1 -Prompt "以下是<讲者>关于<主题>的简体中文分享，涉及<人名/术语>。嗯，那个，就是说，对吧。"
+powershell -File scripts\transcribe_all.ps1 -Prompt "以下是<讲者>关于<主题>的简体中文分享，涉及<人名/术语>。"
 ```
 - Videos with uploader subtitles: converted straight to `transcripts\<id>.txt` (+ `.srt`)
   in seconds, Whisper skipped.
 - Everything else: faster-whisper large-v3, CPU int8, VAD + anti-repetition flags. Any
   audio/video file dropped into `audio\` by hand gets transcribed too.
-- Each transcript also gets **`<id>.逐字稿.md`**: the verbatim text, one `[HH:MM:SS]` line
-  per segment, frontmatter filled from `index.txt`. Old transcripts get one back-filled on
-  the next run.
-- **Transcripts are 原汁原味 — never edit them.** No cleanup, no filler removal, no
-  name fixes, no re-punctuation. Corrections belong in the note only.
+- `transcripts\<id>.txt` is the **raw** transcript — the source for step 5, never edited.
 - **Always pass `-Prompt`** naming the speaker, topic, and a few key names/terms — it's the
-  cheapest accuracy win (correct 专名, Simplified not Traditional). End it with filler
-  words (`嗯，那个，就是说，对吧。`): Whisper copies the prompt's style, so this keeps
-  the speaker's 口头禅 instead of tidying them away. Example for 政经鲁社长:
-  `"以下是政经鲁社长的简体中文内部分享，内容涉及美股投资、政治经济与社会关系。嗯，那个，就是说，对吧。"`
+  cheapest accuracy win (correct 专名, Simplified not Traditional). Example for 政经鲁社长:
+  `"以下是政经鲁社长的简体中文内部分享，内容涉及美股投资、政治经济与社会关系。"`
 - English or mixed-language X clips: `-Language en` or `-Language auto` with `-Prompt ""`.
 
 On the current machine Whisper runs on **CPU** (the 4GB Maxwell GPU can't accelerate
 large-v3 — see environment notes). Budget ~0.3x realtime ≈ 5 h per 100-min video; a 3-min
 X clip is ~10 min. The script keeps Windows from sleeping while it runs.
 
-### 5. Put the transcript and a detailed note into Obsidian
+### 5. Clean the transcript into a 文字稿
+The user wants the transcript **原汁原味**: the speaker's own words, minus 口癖 and
+erroneous repeats, with **no timestamps**. Write `transcripts\<id>.文字稿.md` from the raw
+`<id>.txt`, working in chunks of ~3000 字 so nothing gets skipped:
+- **Delete only**: fillers used as filler (嗯、啊、呃、哎、那个、就是说、然后、对吧、
+  你知道吧 …), stutters and false starts (我们我们 → 我们; 这个这个 → 这个; a half sentence
+  the speaker abandons and restarts), and the same sentence said twice in a row by mistake.
+  A repeat said on purpose for emphasis stays. 那个/然后/对吧 stay when they carry meaning.
+- **Add**: punctuation, and paragraph breaks where the topic shifts.
+- **Fix**: only clear mis-hearings of 专名 (巴非特 → 巴菲特).
+- **Never**: reword, smooth out the speaker's style or dialect, summarize, reorder, or
+  insert anything. No timestamps.
+- Frontmatter (`tags: [文字稿]`, `来源`/`作者`/`日期` from `index.txt`) + `# <标题> · 文字稿`.
+
+Then verify it — required, because LLM cleanup of long text drifts:
+```
+python scripts\check_transcript.py transcripts\<id>.txt transcripts\<id>.文字稿.md
+```
+It must report **no insertions/replacements** other than intended 专名 fixes. Skim the
+"most common deletions" (should be fillers/stutters) and every listed long deletion
+(must be a genuine repeat, not lost content). Fix and re-run until clean.
+
+### 6. Put the 文字稿 and a detailed note into Obsidian
 Two files per video, in the matching vault folder (e.g. `E:\Obsidian\政治经济\<topic>\`):
-1. **逐字稿** — `Copy-Item transcripts\<id>.逐字稿.md "<vault folder>\<标题> · 逐字稿.md"`.
-   A file copy, never re-typed by the model: long text re-written by an LLM drifts.
-2. **笔记** — read the whole 逐字稿 first, then write `<标题>.md`. The user wants it **as
+1. **文字稿** — `Copy-Item transcripts\<id>.文字稿.md "<vault folder>\<标题> · 文字稿.md"`
+   (a file copy, not re-typed).
+2. **笔记** — read the whole 文字稿 first, then write `<标题>.md`. The user wants it **as
    detailed as possible with a clear logical framework**: open with `## 逻辑框架`
    (核心问题 → 核心论点 → 分论点 → 依据 → 结论), then one numbered section per 分论点
-   with 论点 / 为什么 / 例子·数据 / 原话引用 / 由此得出, `[HH:MM:SS]` on every claim,
-   and closing sections for Q&A, 关键概念与人物, 疑问与待查. Keep every argument,
-   example, number and name; only filler and chatter go. Organize by the speaker's
-   argument, not by when things were said.
+   with 论点 / 为什么 / 例子·数据 / 原话引用 / 由此得出, and closing sections for Q&A,
+   关键概念与人物, 疑问与待查. Keep every argument, example, number and name. Organize
+   by the speaker's argument, not by when things were said. No timestamps.
 Full spec + template in **[references/obsidian-note-format.md](references/obsidian-note-format.md)**.
-For a 100-minute talk, work through the 逐字稿 in chunks (e.g. 20-minute spans), take
-detailed notes on each, then build the framework and sections from all of them — a single
-pass over the whole text loses detail. Mark where the 真正内容 begins if the video has a
-long intro (videos often note "正片开始 HH:MM:SS").
+For a 100-minute talk, work through the 文字稿 in chunks, take detailed notes on each, then
+build the framework and sections from all of them — a single pass over the whole text
+loses detail. If the video has a long intro, mark where the 正片 begins in the 文字稿 with a
+`---` line (don't cut the intro) and start the note there.
 
 ## Hardware note
 The CPU-only constraint and all the fp16/VRAM gymnastics are specific to a GTX 950M (4GB).
