@@ -77,30 +77,44 @@ challenge; without them you only get image storyboards. See environment notes fo
 
 ### 4. Transcribe
 ```
-powershell -File scripts\transcribe_all.ps1 -Prompt "以下是<讲者>关于<主题>的简体中文分享，涉及<人名/术语>。"
+powershell -File scripts\transcribe_all.ps1 -Prompt "以下是<讲者>关于<主题>的简体中文分享，涉及<人名/术语>。嗯，那个，就是说，对吧。"
 ```
 - Videos with uploader subtitles: converted straight to `transcripts\<id>.txt` (+ `.srt`)
   in seconds, Whisper skipped.
 - Everything else: faster-whisper large-v3, CPU int8, VAD + anti-repetition flags. Any
   audio/video file dropped into `audio\` by hand gets transcribed too.
+- Each transcript also gets **`<id>.逐字稿.md`**: the verbatim text, one `[HH:MM:SS]` line
+  per segment, frontmatter filled from `index.txt`. Old transcripts get one back-filled on
+  the next run.
+- **Transcripts are 原汁原味 — never edit them.** No cleanup, no filler removal, no
+  name fixes, no re-punctuation. Corrections belong in the note only.
 - **Always pass `-Prompt`** naming the speaker, topic, and a few key names/terms — it's the
-  cheapest accuracy win (correct 专名, Simplified not Traditional). Example for 政经鲁社长:
-  `"以下是政经鲁社长的简体中文内部分享，内容涉及美股投资、政治经济与社会关系。"`
+  cheapest accuracy win (correct 专名, Simplified not Traditional). End it with filler
+  words (`嗯，那个，就是说，对吧。`): Whisper copies the prompt's style, so this keeps
+  the speaker's 口头禅 instead of tidying them away. Example for 政经鲁社长:
+  `"以下是政经鲁社长的简体中文内部分享，内容涉及美股投资、政治经济与社会关系。嗯，那个，就是说，对吧。"`
 - English or mixed-language X clips: `-Language en` or `-Language auto` with `-Prompt ""`.
 
 On the current machine Whisper runs on **CPU** (the 4GB Maxwell GPU can't accelerate
 large-v3 — see environment notes). Budget ~0.3x realtime ≈ 5 h per 100-min video; a 3-min
 X clip is ~10 min. The script keeps Windows from sleeping while it runs.
 
-### 5. Turn the transcript into an Obsidian note
-This is the deliverable, not the raw transcript. Read the transcript, look up its line in
-`index.txt` for source/author/date, then write a note that matches the user's existing
-format: frontmatter `tags:` + `上级: "[[…总览]]"` + source fields, an H1, `---` section
-dividers, `## N. 主题` headers, layered bullets, `> [!tip]` callouts, ⭐ for key tools.
-Short X clips get a compact single-section note. Full spec + example in
-**[references/obsidian-note-format.md](references/obsidian-note-format.md)**.
-Place under the matching vault folder (e.g. `E:\Obsidian\政治经济\<topic>\`). Mark where the
-真正内容 begins if the video has a long intro (videos often note "正片开始 HH:MM:SS").
+### 5. Put the transcript and a detailed note into Obsidian
+Two files per video, in the matching vault folder (e.g. `E:\Obsidian\政治经济\<topic>\`):
+1. **逐字稿** — `Copy-Item transcripts\<id>.逐字稿.md "<vault folder>\<标题> · 逐字稿.md"`.
+   A file copy, never re-typed by the model: long text re-written by an LLM drifts.
+2. **笔记** — read the whole 逐字稿 first, then write `<标题>.md`. The user wants it **as
+   detailed as possible with a clear logical framework**: open with `## 逻辑框架`
+   (核心问题 → 核心论点 → 分论点 → 依据 → 结论), then one numbered section per 分论点
+   with 论点 / 为什么 / 例子·数据 / 原话引用 / 由此得出, `[HH:MM:SS]` on every claim,
+   and closing sections for Q&A, 关键概念与人物, 疑问与待查. Keep every argument,
+   example, number and name; only filler and chatter go. Organize by the speaker's
+   argument, not by when things were said.
+Full spec + template in **[references/obsidian-note-format.md](references/obsidian-note-format.md)**.
+For a 100-minute talk, work through the 逐字稿 in chunks (e.g. 20-minute spans), take
+detailed notes on each, then build the framework and sections from all of them — a single
+pass over the whole text loses detail. Mark where the 真正内容 begins if the video has a
+long intro (videos often note "正片开始 HH:MM:SS").
 
 ## Hardware note
 The CPU-only constraint and all the fp16/VRAM gymnastics are specific to a GTX 950M (4GB).
