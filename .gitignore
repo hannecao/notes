@@ -1,9 +1,14 @@
 ﻿cookies.txt
 *.cookies.txt
+cookies-*.txt
+*_cookies.txt
 audio/
+subs/
 transcripts/
 *.webm
 *.mp3
 *.wav
+*.m4a
+*.opus
 models/
 

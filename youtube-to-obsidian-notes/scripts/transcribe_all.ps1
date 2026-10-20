@@ -1,27 +1,79 @@
-# Batch transcribe all downloaded audio with local large-v3 (int8) on GPU.
+﻿# Batch transcribe everything in <Root>\audio with local faster-whisper (large-v3, CPU int8).
 # Idempotent: skips audio whose transcript already exists.
+# If download_all.ps1 grabbed uploader-made Chinese subtitles for a video, those are used
+# directly and Whisper is skipped for it (seconds instead of hours).
+#
+#   powershell -File transcribe_all.ps1 -Prompt "以下是政经鲁社长的简体中文内部分享，内容涉及美股投资、政治经济与社会关系。"
+#   powershell -File transcribe_all.ps1 -Language en -Prompt ""
+param(
+    [string]$Root     = "H:\yt-notes",
+    [string]$Model    = "",          # model folder; default <Root>\models\faster-whisper-large-v3
+    [string]$Device   = "cpu",       # GPU(950M) can't run large-v3 -> CPU. Mac/newer GPU: change this
+    [string]$Compute  = "int8",
+    [int]$Threads     = 8,
+    [string]$Language = "zh",        # "auto" = let Whisper detect (mixed-language X clips)
+    [string]$Prompt   = "以下是普通话的内容，使用简体中文。",  # name the speaker/topic for better terms
+    [switch]$NoSubs                  # ignore downloaded subtitles, always run Whisper
+)
 $ErrorActionPreference = 'Continue'
-$root      = "H:\yt-notes"
-$audioDir  = "$root\audio"
-$outDir    = "$root\transcripts"
-$model     = "$root\models\faster-whisper-large-v3"
-$device    = "cpu"             # GPU(950M) driver too old for ctranslate2 CUDA -> use CPU
-$compute   = "int8"
-$prompt    = "以下是政经鲁社长的简体中文内部分享，内容涉及美股投资、政治经济与社会关系。"
-
+if (-not $Model) { $Model = "$Root\models\faster-whisper-large-v3" }
+$audioDir = "$Root\audio"
+$subsDir  = "$Root\subs"
+$outDir   = "$Root\transcripts"
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
-$audios = Get-ChildItem $audioDir -File | Where-Object { $_.Extension -in '.webm','.m4a','.opus','.mp3' } | Sort-Object Name
+# Keep the machine awake for multi-hour CPU runs; cleared automatically when this process exits.
+Add-Type -Namespace Win32 -Name Power -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint esFlags);'
+[Win32.Power]::SetThreadExecutionState([uint32]"0x80000001") | Out-Null   # ES_CONTINUOUS | ES_SYSTEM_REQUIRED
+
+# Subtitle language preference: Simplified first, then any other Chinese track.
+function Find-Subtitle([string]$id) {
+    if ($NoSubs -or -not (Test-Path $subsDir)) { return $null }
+    $subs = Get-ChildItem $subsDir -File -Filter "$id.*.srt"
+    foreach ($lang in "zh-Hans", "zh-CN", "zh", "zh-SG") {
+        $hit = $subs | Where-Object { $_.Name -eq "$id.$lang.srt" -or $_.Name -like "$id.$lang-*.srt" } | Select-Object -First 1
+        if ($hit) { return $hit }
+    }
+    return $subs | Select-Object -First 1
+}
+
+# SRT -> plain text in the same one-line-per-segment shape Whisper's .txt has.
+function Convert-SrtToText([string]$srt, [string]$txt) {
+    $prev = $null
+    $lines = foreach ($l in Get-Content $srt -Encoding utf8) {
+        $l = ($l -replace '<[^>]+>', '').Trim()
+        if (-not $l -or $l -match '^\d+$' -or $l -match '-->') { continue }
+        if ($l -ne $prev) { $l }
+        $prev = $l
+    }
+    Set-Content $txt $lines -Encoding utf8
+}
+
+$exts = '.webm', '.m4a', '.opus', '.mp3', '.aac', '.ogg', '.wav', '.flac', '.mp4', '.mkv', '.mov'
+$audios = Get-ChildItem $audioDir -File | Where-Object { $_.Extension -in $exts } | Sort-Object Name
 foreach ($a in $audios) {
     $id  = $a.BaseName
     $txt = Join-Path $outDir "$id.txt"
     if (Test-Path $txt) { Write-Host "[SKIP] $id (transcript exists)"; continue }
+
+    $sub = Find-Subtitle $id
+    if ($sub) {
+        Copy-Item $sub.FullName (Join-Path $outDir "$id.srt")
+        Convert-SrtToText $sub.FullName $txt
+        Write-Host "[SUBS] $id  <- $($sub.Name) (uploader subtitles, Whisper skipped)"
+        continue
+    }
+
     Write-Host "[TRANSCRIBE] $id  ($([math]::Round($a.Length/1MB,0)) MB) ..."
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
-    whisper-ctranslate2 $a.FullName `
-        --model_directory $model --language zh --device $device --compute_type $compute --threads 8 `
-        --output_dir $outDir --output_format all `
-        --initial_prompt $prompt --vad_filter True --condition_on_previous_text False
+    $opts = @(
+        "--model_directory", $Model, "--device", $Device, "--compute_type", $Compute, "--threads", $Threads,
+        "--output_dir", $outDir, "--output_format", "all",
+        "--vad_filter", "True", "--condition_on_previous_text", "False"
+    )
+    if ($Language -ne "auto") { $opts += "--language", $Language }
+    if ($Prompt) { $opts += "--initial_prompt", $Prompt }
+    whisper-ctranslate2 $a.FullName @opts
     $sw.Stop()
     Write-Host ("[DONE] {0} in {1} min" -f $id, [math]::Round($sw.Elapsed.TotalMinutes,1))
 }

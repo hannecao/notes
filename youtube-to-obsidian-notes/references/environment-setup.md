@@ -67,9 +67,23 @@ float16** ("does not support efficient … computation"), and large-v3 in float3
   简体 (prevents drifting into traditional characters) and correct domain terms/names.
 
 ## Keeping the machine awake during long runs
-A 5 h CPU job can be interrupted by display sleep. Hold the system awake from the same
-process with `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)` (see the launch
-snippet in the transcribe scripts) — it auto-clears when the process exits, no settings change.
+A 5 h CPU job can be interrupted by display sleep. `transcribe_all.ps1` holds the
+system awake from its own process with `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)`
+— it auto-clears when the process exits, no settings change.
+
+## Script encoding
+The `.ps1` scripts contain Chinese (the default `-Prompt`) and are saved as **UTF-8 with
+BOM**. Windows PowerShell 5.1 reads BOM-less files as the ANSI code page (GBK on Chinese
+Windows), which would garble the prompt. Keep the BOM when editing.
+
+## Faster model to try (untested on this machine)
+`large-v3-turbo` keeps the large-v3 encoder but has 4 decoder layers instead of 32, so it
+transcribes several times faster on CPU, at slightly lower accuracy (mostly on rare names).
+Worth testing for long casual content. Fetch the CTranslate2 build
+(`mobiuslabsgmbh/faster-whisper-large-v3-turbo`) from hf-mirror the same way as §2 into
+`models\faster-whisper-large-v3-turbo`, then
+`transcribe_all.ps1 -Model H:\yt-notes\models\faster-whisper-large-v3-turbo`.
+Compare one transcript against large-v3 before switching.
 
 ## Mac mini (Apple Silicon) — future
 When it arrives, transcription moves there and all of §3/§4 vanish. Install

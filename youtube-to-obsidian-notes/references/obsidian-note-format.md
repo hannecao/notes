@@ -8,6 +8,9 @@ existing course-note style (observed in `E:\Obsidian\政治经济\社会关系�
 ---
 tags: [听课笔记, <主题词>, <主题词>]
 上级: "[[<专题> · 总览]]"
+来源: <链接>
+作者: <讲者 / 推特账号>
+日期: <发布日期 YYYY-MM-DD>
 ---
 
 # <序号/标题，如 ① 九大方法（社长主讲）>
@@ -45,6 +48,16 @@ tags: [听课笔记, <主题词>, <主题词>]
 - Keep everything **Simplified Chinese**, consistent with the source.
 - Fix obvious transcription errors of names/terms from context (e.g. 巴菲特, 比尔·阿克曼,
   标普500, 价值投资) — these matter for searchable notes.
+
+- Fill `来源` / `作者` / `日期` from the video's line in `H:\yt-notes\index.txt`
+  (`id | 站点 | 日期 | 作者 | 链接 | 标题`). Drop a field if it's `NA`.
+
+## Short clips (X/Twitter, < ~10 min)
+Don't force the numbered-section structure onto a 2-minute clip. Same frontmatter
+(`tags` use `推特` instead of `听课笔记`; `上级` only if it belongs to a topic), then:
+an H1 with the clip's point, one line of context (who, where it was said), 3–8 bullets of
+substance, and one `> [!tip] 核心`. If the clip is a reply/quote of another tweet, say what
+it responds to in the context line.
 
 ## Placement & linking
 - Put the note in the matching vault folder, e.g. a new `<topic>\` under `政治经济\`,

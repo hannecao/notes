@@ -1,0 +1,14 @@
+# 一行一个链接，# 后面是注释。可以一直往下追加，已下载的会自动跳过（archive.txt）。
+
+# YouTube 单个视频（带 &list= 也只下这一个）
+https://www.youtube.com/watch?v=VIDEO_ID
+https://youtu.be/VIDEO_ID
+
+# YouTube 整个播放列表（会员视频要先导出 cookies-youtube.txt）
+https://www.youtube.com/playlist?list=PLAYLIST_ID
+
+# X / Twitter 推文里的视频（一条推文多个视频会全部下载）
+https://x.com/USER/status/TWEET_ID
+
+# X Space 回放（需要 cookies-x.txt，且主持人保留了录音）
+https://x.com/i/spaces/SPACE_ID

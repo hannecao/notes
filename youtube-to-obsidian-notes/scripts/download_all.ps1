@@ -1,39 +1,78 @@
-# Batch download audio for all 11 videos (idempotent: skips already-downloaded)
+﻿# Batch download audio for every URL in urls.txt (YouTube videos/playlists, X/Twitter
+# tweets, X Spaces). Idempotent via yt-dlp's download archive: re-running skips anything
+# already downloaded, so you can keep appending URLs to the same list.
+#
+#   powershell -File download_all.ps1                      # uses <Root>\urls.txt
+#   powershell -File download_all.ps1 -Url https://x.com/user/status/123...
+param(
+    [string]$Root = "H:\yt-notes",
+    [string]$List = "",            # default: <Root>\urls.txt
+    [string[]]$Url = @(),          # ad-hoc URLs instead of / in addition to the list
+    [string]$SubLangs = "zh.*",    # YouTube manual subtitles to grab (lets transcribe skip Whisper)
+    [switch]$NoSubs
+)
 $ErrorActionPreference = 'Continue'
 $env:PATH = (Join-Path $env:USERPROFILE ".deno\bin") + ";" + $env:PATH
-$root = "H:\yt-notes"
-$cookies = "$root\cookies.txt"
-$audioDir = "$root\audio"
+if (-not $List) { $List = "$Root\urls.txt" }
+$audioDir = "$Root\audio"
+$subsDir  = "$Root\subs"
+$archive  = "$Root\archive.txt"     # yt-dlp download archive ("youtube <id>", "twitter <id>")
+$index    = "$Root\index.txt"       # id | site | date | author | url | title, for writing notes
+New-Item -ItemType Directory -Force -Path $audioDir, $subsDir | Out-Null
 
-# ordered list: id, label (for logging)
-$videos = @(
-    @{id="etrf9iTQ9FM"; name="06-美股投资策略"},
-    @{id="gsQmoXbF4hs"; name="05-石头贷款400亿"},
-    @{id="-oWVzjpjklw"; name="07-政治力学牛鲁三定律"},
-    @{id="qhMZ8_nzizs"; name="04-美股框架策略二"},
-    @{id="6qyUlohNtdg"; name="03-美股框架策略上"},
-    @{id="ViFeFrH1j90"; name="10-社会关系开拓维护2"},
-    @{id="bFLvb0j-rwk"; name="11-如何拓展社会关系"},
-    @{id="Zoum-Ev3SJg"; name="中南海的湖北佬"},
-    @{id="HY2a3o9CVZQ"; name="AI产业链相关企业分析"},
-    @{id="PwP1Z8b4oe8"; name="王岐山和三家证券公司"},
-    @{id="ps8ZcRGOu_0"; name="AI产业链代表企业下"}
-)
+# One-time migration: audio downloaded by the old hardcoded script has no archive entry.
+# Seed it from YouTube-shaped filenames (11-char ids) so those aren't downloaded again.
+$known = if (Test-Path $archive) { Get-Content $archive } else { @() }
+Get-ChildItem $audioDir -File | Where-Object { $_.BaseName -match '^[\w-]{11}$' -and $_.Extension -ne '.part' } |
+    ForEach-Object { if ("youtube $($_.BaseName)" -notin $known) { Add-Content $archive "youtube $($_.BaseName)" } }
 
-foreach ($v in $videos) {
-    $existing = Get-ChildItem "$audioDir\$($v.id).*" -ErrorAction SilentlyContinue | Where-Object { $_.Extension -ne '.part' }
-    if ($existing) {
-        Write-Host "[SKIP] $($v.id) $($v.name) already downloaded"
-        continue
+if (-not (Test-Path $index)) {
+    Add-Content $index "id | site | date | author | url | title" -Encoding utf8
+}
+
+$urls = @($Url)
+if (Test-Path $List) {
+    $urls += Get-Content $List -Encoding utf8 | ForEach-Object { ($_ -replace '(^|\s)#.*$', '').Trim() } | Where-Object { $_ }
+}
+if (-not $urls) { Write-Host "No URLs. Put one per line in $List or pass -Url."; exit 1 }
+
+# Separate cookie files per site: YouTube's must come from a frozen incognito session,
+# X's can be exported from a normal window. YouTube falls back to the old single cookies.txt.
+function Get-Cookies([string]$site) {
+    $files = @("$Root\cookies-$site.txt")
+    if ($site -eq "youtube") { $files += "$Root\cookies.txt" }
+    foreach ($f in $files) { if (Test-Path $f) { return $f } }
+    return $null
+}
+
+foreach ($u in $urls) {
+    $isX = $u -match '^https?://(www\.|mobile\.)?(x|twitter)\.com/'
+    $site = if ($isX) { "x" } else { "youtube" }
+    $opts = @(
+        "--no-playlist",                       # watch?v=..&list=.. -> just that video; pure playlist URLs still expand
+        "--download-archive", $archive,
+        "-f", "ba/b", "-x",                    # audio only; X often has no audio-only stream, so extract from video
+        "--no-progress",
+        "-o", "$audioDir/%(id)s.%(ext)s",
+        "--print-to-file", "after_move:%(id)s | %(extractor_key)s | %(upload_date>%Y-%m-%d)s | %(uploader)s | %(webpage_url)s | %(title)s", $index
+    )
+    $c = Get-Cookies $site
+    if ($c) { $opts += "--cookies", $c }
+    if ($isX) {
+        if (-not $c) { Write-Host "[WARN] no cookies-x.txt: NSFW/protected tweets and Spaces will fail" }
+    } else {
+        $opts += "--remote-components", "ejs:github"   # YouTube n-sig/PO-token challenge (needs Deno)
+        if (-not $NoSubs) {
+            # Manual (uploader-made) subtitles only; auto-captions are worse than Whisper.
+            $opts += "--write-subs", "--sub-langs", $SubLangs, "--convert-subs", "srt",
+                     "-o", "subtitle:$subsDir/%(id)s.%(ext)s"
+        }
     }
-    Write-Host "[DL]   $($v.id) $($v.name) ..."
-    yt-dlp --cookies $cookies --no-playlist --remote-components ejs:github `
-        -f bestaudio --no-progress `
-        -o "$audioDir/%(id)s.%(ext)s" `
-        "https://www.youtube.com/watch?v=$($v.id)" 2>&1 |
-        Where-Object { $_ -match 'ERROR|Destination|has already|Downloading webpage' } | Select-Object -Last 3
-    Write-Host "[DONE] $($v.id)"
+    Write-Host "[DL]   $u"
+    yt-dlp @opts $u 2>&1 |
+        Where-Object { $_ -match 'ERROR|WARNING: .*(members|login|cookies)|Destination|already been recorded' } |
+        Select-Object -Last 5
 }
 Write-Host "==== ALL DOWNLOADS COMPLETE ===="
-Get-ChildItem $audioDir -File | Where-Object { $_.Extension -in '.webm','.m4a','.opus','.mp3' } |
-    ForEach-Object { "{0}  {1} MB" -f $_.Name, [math]::Round($_.Length/1MB,1) }
+Get-ChildItem $audioDir -File | Where-Object { $_.Extension -ne '.part' } | Sort-Object LastWriteTime |
+    Select-Object -Last 20 | ForEach-Object { "{0}  {1} MB" -f $_.Name, [math]::Round($_.Length/1MB,1) }
